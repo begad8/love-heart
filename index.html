@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#060208">
+<title>Love Heart</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#060208}
+  body{display:grid;place-items:center}
+  canvas{display:block;width:min(100vw,100vh);height:min(100vw,100vh);max-width:100%;max-height:100%;touch-action:manipulation}
+  .hint{position:fixed;bottom:max(12px,env(safe-area-inset-bottom));left:0;right:0;text-align:center;
+    color:rgba(255,210,220,.42);font:12px Arial,sans-serif;letter-spacing:.08em;pointer-events:none}
+</style>
+</head>
+<body>
+<canvas id="heart" aria-label="A heart forming from love phrases"></canvas>
+<div class="hint">A HEART MADE OF WORDS</div>
+<script>
+(() => {
+  const canvas = document.getElementById('heart');
+  const ctx = canvas.getContext('2d');
+  const BG = '#060208', SC = 21, OY = 20, DURATION = 10, ANIM = 42, LIFT = 34, GAP = 7;
+  const SIZES = [9,10,11,12];
+  const PHRASES = [
+    "I love you", "Seni seviyorum", "Te amo", "Je t'aime",
+    "Ich liebe dich", "Ti amo", "Eu te amo", "Я тебя люблю",
+    "사랑해", "愛してる", "我爱你", "मैं तुमसे प्यार करता हूँ",
+    "Σ' αγαπώ", "Ik hou van jou", "Jag älskar dig", "Kocham cię",
+    "ฉันรักเธอ", "Anh yêu em", "Aku cinta kamu", "Я тебе кохаю"
+  ];
+  // Seeded random generator keeps the composition consistent on every visit.
+  let seed = 11;
+  const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  const choice = a => a[Math.floor(rand()*a.length)];
+  const mix = (a,b,k) => a.map((v,i)=>v+(b[i]-v)*k);
+  const dim = (c,k) => c.map(v=>v*k);
+  const clamp = v => Math.max(0,Math.min(1,v));
+  const hex = c => '#'+c.map(v=>Math.round(clamp(v)*255).toString(16).padStart(2,'0')).join('');
+  const BGC = [6/255,2/255,8/255], FLASH = [1,.78,.78];
+  let W=800,H=800,scale=1,placed=[],active=[],mainItems=[],spawnIndex=0,last=0,elapsed=0,shimmerTimer=0;
+
+  function resize(){
+    const dpr=Math.min(window.devicePixelRatio||1,2);
+    const side=Math.min(window.innerWidth,window.innerHeight);
+    canvas.width=Math.round(side*dpr); canvas.height=Math.round(side*dpr);
+    canvas.style.width=side+'px'; canvas.style.height=side+'px';
+    W=canvas.width; H=canvas.height; scale=W/800;
+    ctx.setTransform(dpr*side/800,0,0,dpr*side/800,0,0);
+    // Work in the original 800x800 coordinate system.
+    build();
+  }
+  function heart(a){
+    return [16*Math.sin(a)**3*SC, (13*Math.cos(a)-5*Math.cos(2*a)-2*Math.cos(3*a)-Math.cos(4*a))*SC+OY];
+  }
+  const poly=Array.from({length:720},(_,i)=>heart(2*Math.PI*i/720));
+  const edges=poly.map((p,i)=>[p,poly[(i+1)%poly.length]]);
+  const ymax=Math.max(...poly.map(p=>p[1])), ymin=Math.min(...poly.map(p=>p[1]));
+  const cy=(ymax+ymin)/2;
+  function spans(y){
+    const xs=[];
+    for(const [[x1,y1],[x2,y2]] of edges){
+      if((y1<=y&&y<y2)||(y2<=y&&y<y1)) xs.push(x1+(y-y1)*(x2-x1)/(y2-y1));
+    }
+    xs.sort((a,b)=>a-b);
+    const out=[]; for(let i=0;i+1<xs.length;i+=2) out.push([xs[i],xs[i+1]]);
+    return out;
+  }
+  function intersect(A,B){
+    const out=[]; for(const a of A) for(const b of B){
+      const lo=Math.max(a[0],b[0]),hi=Math.min(a[1],b[1]);
+      if(hi-lo>14) out.push([lo,hi]);
+    } return out;
+  }
+  function mathDist(x,y){return Math.hypot(x/(16*SC),(y-cy)/(14.5*SC));}
+  function build(){
+    seed=11; placed=[]; active=[]; mainItems=[]; spawnIndex=0; elapsed=0;
+    ctx.font='bold 12px Arial';
+    const rowH=20,half=rowH/2;
+    let y=ymax-half, phraseOrder=[],phrasePos=0;
+    function nextPhrase(){
+      if(phrasePos>=phraseOrder.length){phraseOrder=PHRASES.slice();for(let i=phraseOrder.length-1;i>0;i--){const j=Math.floor(rand()*(i+1));[phraseOrder[i],phraseOrder[j]]=[phraseOrder[j],phraseOrder[i]];}phrasePos=0;}
+      return phraseOrder[phrasePos++];
+    }
+    while(y>ymin+half){
+      const row=intersect(spans(y+half),spans(y-half));
+      for(let [lo0,hi0] of row){
+        const lo=lo0+4,hi=hi0-4; let cur=lo+rand()*8,line=[];
+        while(true){
+          let fit=null;
+          for(let k=0;k<10;k++){
+            const text=nextPhrase(),size=choice(SIZES);
+            ctx.font=`bold ${size}px Arial`;
+            const width=ctx.measureText(text).width;
+            if(cur+width<=hi){fit={text,size,width};break;}
+          }
+          if(!fit) break;
+          line.push({x:cur+fit.width/2,text:fit.text,size:fit.size,width:fit.width});
+          cur+=fit.width+GAP;
+        }
+        if(!line.length) continue;
+        if(line.length>1){
+          const left=hi-(line[line.length-1].x+line[line.length-1].width/2);
+          line.forEach((p,i)=>p.x+=left*i/(line.length-1));
+        }else line[0].x=(lo+hi)/2;
+        line.forEach((p,i)=>placed.push({...p,y,edge:i===0||i===line.length-1}));
+      }
+      y-=rowH;
+    }
+    const wine=[.58,0,.09],crimson=[.90,.05,.14],blood=[.98,.10,.16];
+    for(const p of placed){
+      const rad=Math.min(1,mathDist(p.x,p.y));
+      let base=mix(wine,crimson,.25+.75*rad);
+      base=mix(base,blood,rand()*.35+(p.edge?.3:0));
+      p.color=base.map(v=>Math.min(1,v));p.rad=rad;
+    }
+    const outer=placed.filter(p=>p.edge),inner=placed.filter(p=>!p.edge);
+    outer.sort((a,b)=>(Math.atan2(a.x,a.y-cy)%(2*Math.PI))-(Math.atan2(b.x,b.y-cy)%(2*Math.PI)));
+    inner.sort((a,b)=>(-a.rad+rand()*.08)-(-b.rad+rand()*.08));
+    placed=outer.concat(inner);
+    last=performance.now();
+  }
+  function spawn(p){
+    p.f=0;p.dx=(rand()*20)-10;p.x0=p.x;p.y0=800-p.y;
+    active.push(p);mainItems.push(p);
+  }
+  function drawText(p,x,y,color,alpha=1,size=p.size){
+    ctx.globalAlpha=alpha;ctx.font=`bold ${size}px Arial`;ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillStyle=color;ctx.fillText(p.text,x,y);
+  }
+  function frame(now){
+    const dt=Math.min(50,now-last);last=now;
+    ctx.clearRect(0,0,800,800);ctx.fillStyle=BG;ctx.fillRect(0,0,800,800);
+    elapsed+=dt;
+    const rate=placed.length/(DURATION*1000);
+    // Spawn at the same overall pace as the Python animation.
+    const target=Math.min(placed.length,Math.floor(elapsed*rate));
+    while(spawnIndex<target) spawn(placed[spawnIndex++]);
+    const still=[];
+    for(const p of active){
+      p.f+=dt/(1000/60);
+      const u=clamp(p.f/ANIM),e=1-(1-u)**3,c=p.color;
+      const x=p.x0+p.dx*(1-e),y=p.y0-(1-e)*LIFT;
+      drawText(p,x+2,y+3,hex(mix(BGC,dim(c,.30),e)));
+      drawText(p,x,y,hex(mix(BGC,dim(c,.20),e*e)),1,p.size+1);
+      const flash=.75*Math.sin(Math.PI*clamp((u-.55)/.45));
+      const col=mix(mix(BGC,c,e**1.5),FLASH,flash);
+      drawText(p,x,y,hex(col));
+      if(u<1) still.push(p);
+    }
+    active=still;
+    if(spawnIndex>=placed.length&&active.length===0){
+      shimmerTimer+=dt;
+      if(shimmerTimer>140){
+        shimmerTimer=0;
+        if(mainItems.length){
+          const p=choice(mainItems);p.flashUntil=now+260;
+        }
+      }
+      for(const p of mainItems){
+        const bright=p.flashUntil&&now<p.flashUntil;
+        drawText(p,p.x,p.y0,bright?hex(mix(p.color,FLASH,.6)):hex(p.color));
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+  window.addEventListener('resize',resize,{passive:true});
+  resize();requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
